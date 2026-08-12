@@ -260,6 +260,29 @@ void matrixEnable(void) {
   backlightDisabled = 0;
   chMtxLock(&mtx);
 
+  /*
+   * Sanitize ISR bookkeeping and GPIO before the first timer tick.
+   *
+   * If the matrix was previously disabled (or never enabled this boot),
+   * currentColumn / pwmCounter / rowTimes may hold stale values, and the
+   * column/row lines may be in an unknown state. Without this reset the first
+   * few PWM cycles can light unexpected LEDs until the profile callback
+   * repaints ledColors.
+   */
+  currentColumn = 0;
+  pwmCounter = 0;
+  rowsEnabled = 0;
+  for (int i = 0; i < NUM_ROW * 3; i++) {
+    rowTimes[i] = 0;
+  }
+  palClearLine(LINE_LED_PWR);
+  for (int i = 0; i < NUM_COLUMN; i++) {
+    palClearLine(ledColumns[i]);
+  }
+  for (int i = 0; i < NUM_ROW * 3; i++) {
+    palClearLine(ledRows[i]);
+  }
+
   palSetLine(LINE_LED_PWR);
 
   // start PWM handling interval
@@ -274,4 +297,29 @@ void matrixEnable(void) {
 void matrixInit() {
   chMtxObjectInit(&mtx);
   matrixEnabled = false;
+
+  /*
+   * Explicitly drive every LED-related GPIO line low at init.
+   *
+   * pal_default_config (board.c) sets these outputs to 0 and main() clears
+   * LINE_LED_PWR, but there is a window between power-on and main() running
+   * where these pins can float and partially light the matrix (the "half-on
+   * after replug" symptom). Reasserting a known-off state here closes that
+   * window regardless of what the reset state or the main MCU does.
+   */
+  palClearLine(LINE_LED_PWR);
+  for (int i = 0; i < NUM_COLUMN; i++) {
+    palClearLine(ledColumns[i]);
+  }
+  for (int i = 0; i < NUM_ROW * 3; i++) {
+    palClearLine(ledRows[i]);
+  }
+
+  /* Reset ISR bookkeeping so the first PWM cycle runs against clean state. */
+  currentColumn = 0;
+  pwmCounter = 0;
+  rowsEnabled = 0;
+  for (int i = 0; i < NUM_ROW * 3; i++) {
+    rowTimes[i] = 0;
+  }
 }
